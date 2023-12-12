@@ -378,10 +378,18 @@ autoencoder.add_loss(loss)
 autoencoder.compile(optimizer='adam')
 myCallBacks = tf.keras.callbacks.EarlyStopping(monitor='loss', patience=10, mode='min')
 
+list_of_people=[]
+for i in range(1,33):
+  list_of_people.append(i)
 
-data_normalized = []
+train_people, test_people = train_test_split(list_of_people, test_size=0.3, random_state=42, shuffle=True)
+test_people, val_people = train_test_split(test_people, test_size=0.5, random_state=42, shuffle=True)
+
+data_train=[]
+data_test=[]
+data_val=[]
 #training the autoencoder
-for person in range (1,2):
+for person in range (1,33):
   #read dataset and generate Topographic Maps to train the autoencoder with listOfTopographicMapsForAE
   rawDataset,rawDatasetForMontageLocation= readDataset(verbose=False, path="s{:02d}.bdf".format(person))
 
@@ -409,13 +417,17 @@ for person in range (1,2):
 
   dataNormReshape=dataNorm.reshape(-1,listOfTopographicMapsForAE.shape[1],listOfTopographicMapsForAE.shape[2],1)
 
-  data_normalized.extend(dataNormReshape)
+  if(person in train_people):
+    data_train.extend(dataNormReshape)
+  elif(person in test_people):
+    data_test.extend(dataNormReshape)
+  else:
+    data_val.extend(dataNormReshape)
 
 
-data_normalized = np.array(data_normalized)
-
-data_train, data_test = train_test_split(data_normalized, test_size=0.3, random_state=42, shuffle=True)
-data_test, data_val = train_test_split(data_test, test_size=0.5, random_state=42, shuffle=True)
+data_test = np.array(data_test)
+data_train = np.array(data_train)
+data_val = np.array(data_val)
 
 vae=autoencoder.fit(data_train, epochs=epoch, batch_size=batch_size, validation_data=(data_val, None), callbacks= [myCallBacks])
 
@@ -424,7 +436,7 @@ vae=autoencoder.fit(data_train, epochs=epoch, batch_size=batch_size, validation_
 # encoderModelTrained = tf.keras.models.Model(inputs=autoencoder.input, outputs=encoder.output)
 
 
-predicted_wholedataset=autoencoder.predict(data_normalized).reshape(-1,data_normalized.shape[1],data_normalized.shape[2])
+
 predicted_train=autoencoder.predict(data_train).reshape(-1,data_train.shape[1],data_train.shape[2])
 #predicted_val=autoencoder.predict(data_val).reshape(-1,data_val.shape[1],data_val.shape[2])
 predicted_test=autoencoder.predict(data_test).reshape(-1,data_test.shape[1],data_test.shape[2])
