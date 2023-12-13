@@ -29,7 +29,7 @@ from skimage import metrics
 from sklearn.metrics import mean_absolute_error
 from sklearn.model_selection import train_test_split
 import tensorflow as tf
-from calculate_bdm import calculate_bdm
+from calculate_bdm_old import calculate_bdm
 
 
 
@@ -420,14 +420,16 @@ data_test, data_val = train_test_split(data_test, test_size=0.5, random_state=42
 vae=autoencoder.fit(data_train, epochs=epoch, batch_size=batch_size, validation_data=(data_val, None), callbacks= [myCallBacks])
 
 # extract encoder from autoencoder
-# encoderTrained = autoencoder.get_layer('encoder')
-# encoderModelTrained = tf.keras.models.Model(inputs=autoencoder.input, outputs=encoder.output)
+encoder_trained = autoencoder.get_layer('encoder')
+encoder_model_trained = Model(inputs=autoencoder.input, outputs=encoder_trained(encoder_input)[2])
 
 
 predicted_wholedataset=autoencoder.predict(data_normalized).reshape(-1,data_normalized.shape[1],data_normalized.shape[2])
 predicted_train=autoencoder.predict(data_train).reshape(-1,data_train.shape[1],data_train.shape[2])
 #predicted_val=autoencoder.predict(data_val).reshape(-1,data_val.shape[1],data_val.shape[2])
 predicted_test=autoencoder.predict(data_test).reshape(-1,data_test.shape[1],data_test.shape[2])
+
+middle_vals_test = np.array(encoder_model_trained.predict(data_test))
 
 
 # print("The BDM of the data_train: " + str(calculate_bdm(data_test, normalized=False)))
@@ -514,6 +516,38 @@ with open('test_all.csv', 'a') as f:
   writer.writerow(header)
   #write the data
   writer.writerow(result)
+
+
+header=[]
+
+header.append('Num')
+header.append('Dimension')
+header.append('Actual Data BDM')
+header.append('Encoded Data BDM')
+header.append('Predicted Data BDM')
+header.append('Actual Data NBDM')
+header.append('Encoded Data NBDM')
+header.append('Predicted Data NBDM')
+
+with open('test_all_test_bdms.csv', 'a') as f:
+  writer = csv.writer(f)
+  #header = ['Time_Slice_length','Dimension','SSIM', 'MSE','Training Accuracy', 'Training F1-Score', 'Training Precision', 'Training Recall','Validation Accuracy']
+  #writer.writerow(header)
+  #write the header
+  writer.writerow(header)
+  #write the data
+  for i in range(actual_test.shape[0]):
+    result=[]
+    result.append(i)
+    result.append(z_dim)
+    result.append(calculate_bdm(actual_test[i]))
+    result.append(calculate_bdm(middle_vals_test[i]))
+    result.append(calculate_bdm(predicted_test[i]))
+    result.append(calculate_bdm(actual_test[i], normalized=True))
+    result.append(calculate_bdm(middle_vals_test[i], normalized=True))
+    result.append(calculate_bdm(predicted_test[i], normalized=True))
+    writer.writerow(result)
+  writer.writerow([])
 
 end_time = datetime.now()
 print('Duration: {}'.format(end_time - start_time))
