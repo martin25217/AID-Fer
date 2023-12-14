@@ -29,13 +29,13 @@ from skimage import metrics
 from sklearn.metrics import mean_absolute_error
 from sklearn.model_selection import train_test_split
 import tensorflow as tf
-from CODE.australac.calculate_bdm_old import calculate_bdm
+from calculate_bdm_old import calculate_bdm
 
 
 
 def readDataset(verbose=False, path='s01.bdf'):
 
-  raw = mne.io.read_raw_bdf('CODE/australac/data_original/'+path, preload=True)
+  raw = mne.io.read_raw_bdf(path, preload=True)
   #print(raw)
   #print(raw.info)
   #print(raw._data.shape)
@@ -273,6 +273,20 @@ def createTopographicMapFromChannelValues(channelValues, interpolationMethod = "
     plt.show()
 
   return interpolatedTopographicMap,CordinateYellowRegion
+
+def removeInterpolation(interpolatedTopographicMap):
+  pos2D = np.array(convert3DTo2D(get3DCoordinates(MontageChannelLocation, NumberOfEEGChannel)))
+  emptyTopographicMap = np.array(np.zeros([lengthOfTopographicMap, lengthOfTopographicMap]))
+
+  # Map interpolated values to the closest pixel locations
+  for i in range(len(pos2D)):
+    x, y = pos2D[i]
+    x_idx = int(round((x - min(pos2D[:, 0])) / (max(pos2D[:, 0]) - min(pos2D[:, 0])) * (lengthOfTopographicMap - 1)))
+    y_idx = int(round((y - min(pos2D[:, 1])) / (max(pos2D[:, 1]) - min(pos2D[:, 1])) * (lengthOfTopographicMap - 1)))
+    
+    emptyTopographicMap[y_idx, x_idx] = interpolatedTopographicMap[y_idx, x_idx]
+
+  return emptyTopographicMap
 
 
 #initialisation for all required variables.
