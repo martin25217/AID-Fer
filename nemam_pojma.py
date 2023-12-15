@@ -288,6 +288,21 @@ def removeInterpolation(interpolatedTopographicMap):
 
   return emptyTopographicMap
 
+mask=np.load("CODE/australac/mask.npy")
+def removeMask(topographicMap, mask=mask):
+  # Check if the matrices have the same shape
+  if len(topographicMap) != len(mask) or len(topographicMap[0]) != len(mask[0]):
+    raise ValueError("Matrices must have the same shape for element-wise multiplication")
+
+  # Initialize an empty matrix for the result
+  result_matrix = [[0 for _ in range(len(topographicMap[0]))] for _ in range(len(topographicMap))]
+
+  # Perform element-wise multiplication
+  for i in range(len(topographicMap)):
+    for j in range(len(topographicMap[0])):
+      result_matrix[i][j] = topographicMap[i][j] * mask[i][j]
+
+  return np.array(result_matrix)
 
 #initialisation for all required variables.
 sfreq=128
