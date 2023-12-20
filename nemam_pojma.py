@@ -4,6 +4,7 @@ start_time = datetime.now()
 import os
 os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 
+from calculate_bdm_old import calculate_bdm
 import csv
 from keras.layers import ELU, PReLU, LeakyReLU
 from keras.layers import Conv2D, Conv2DTranspose, Dense, Input, Reshape, Flatten,Lambda
@@ -17,6 +18,7 @@ from matplotlib import pyplot as plt
 from matplotlib import ticker
 import mne
 from mne.io import read_raw_bdf
+import networkx as nx
 import numpy as np
 import pandas as pd
 import pdb
@@ -29,7 +31,6 @@ from skimage import metrics
 from sklearn.metrics import mean_absolute_error
 from sklearn.model_selection import train_test_split
 import tensorflow as tf
-from calculate_bdm_old import calculate_bdm
 
 
 
@@ -274,21 +275,17 @@ def createTopographicMapFromChannelValues(channelValues, interpolationMethod = "
 
   return interpolatedTopographicMap,CordinateYellowRegion
 
-def removeInterpolation(interpolatedTopographicMap):
-  pos2D = np.array(convert3DTo2D(get3DCoordinates(MontageChannelLocation, NumberOfEEGChannel)))
-  emptyTopographicMap = np.array(np.zeros([lengthOfTopographicMap, lengthOfTopographicMap]))
+graph_biosemi23 = nx.read_graphml("help_variables/biosemi23.graphml")
+def addMapToBiosemi23Graph(topographicMap, graph=graph_biosemi23):
+  channelValues=getChannellValuesFromMap(topographicMap)
+  line_graph = nx.line_graph(graph)
+  for edge in line_graph.edges():
+    common_element = list(set(edge[0]) & set(edge[1]))[0]
+    line_graph[edge[0]][edge[1]]['weight'] = channelValues[int(common_element)]
+  return nx.to_numpy_array(line_graph)
+  
 
-  # Map interpolated values to the closest pixel locations
-  for i in range(len(pos2D)):
-    x, y = pos2D[i]
-    x_idx = int(round((x - min(pos2D[:, 0])) / (max(pos2D[:, 0]) - min(pos2D[:, 0])) * (lengthOfTopographicMap - 1)))
-    y_idx = int(round((y - min(pos2D[:, 1])) / (max(pos2D[:, 1]) - min(pos2D[:, 1])) * (lengthOfTopographicMap - 1)))
-    
-    emptyTopographicMap[y_idx, x_idx] = interpolatedTopographicMap[y_idx, x_idx]
-
-  return emptyTopographicMap
-
-mask=np.load("CODE/australac/mask.npy")
+mask=np.load("help_variables/mask.npy")
 def removeMask(topographicMap, mask=mask):
   # Check if the matrices have the same shape
   if len(topographicMap) != len(mask) or len(topographicMap[0]) != len(mask[0]):
@@ -303,6 +300,16 @@ def removeMask(topographicMap, mask=mask):
       result_matrix[i][j] = topographicMap[i][j] * mask[i][j]
 
   return np.array(result_matrix)
+
+sensor_matrix = np.load("help_variables/sensorMatrix.npy")
+def getChannellValuesFromMap(topographicMap, matrix=sensor_matrix):
+  channelValues=[]
+  for i in range(1,33):
+    coords=list(np.where(matrix==i))
+    channelValues.append(topographicMap[coords[0][0]][coords[1][0]])
+  return channelValues
+
+
 
 #initialisation for all required variables.
 sfreq=128
@@ -409,6 +416,7 @@ myCallBacks = tf.keras.callbacks.EarlyStopping(monitor='loss', patience=10, mode
 
 
 data_normalized = []
+data_channel_values = []
 #training the autoencoder
 for person in range (1,2):
   #read dataset and generate Topographic Maps to train the autoencoder with listOfTopographicMapsForAE
@@ -422,6 +430,7 @@ for person in range (1,2):
   channelNames = getChannelNames()
 
   listOfTopographicMapsForAE = []
+  listOfChannelValues = []
   for i in range(StartingSamplePoint,EndSamplePoint):
     #get a random sample and load its 32 values
     channelValuesForCurrentSample = list(rawDataset[i,:])
@@ -431,20 +440,27 @@ for person in range (1,2):
     #plt.imshow(interpolatedTopographicMap)
     #plt.show()
     listOfTopographicMapsForAE.append(interpolatedTopographicMap)
+    listOfChannelValues.append(channelValuesForCurrentSample)
   
   listOfTopographicMapsForAE = np.array(listOfTopographicMapsForAE)
+  listOfChannelValues = np.array(listOfChannelValues)
+
 
   dataNorm = (listOfTopographicMapsForAE - listOfTopographicMapsForAE.min()) / (listOfTopographicMapsForAE.max() - listOfTopographicMapsForAE.min())
 
   dataNormReshape=dataNorm.reshape(-1,listOfTopographicMapsForAE.shape[1],listOfTopographicMapsForAE.shape[2],1)
 
   data_normalized.extend(dataNormReshape)
+  data_channel_values.extend(listOfChannelValues)
 
 
 data_normalized = np.array(data_normalized)
+data_channel_values = np.array(data_channel_values)
 
 data_train, data_test = train_test_split(data_normalized, test_size=0.3, random_state=42, shuffle=True)
 data_test, data_val = train_test_split(data_test, test_size=0.5, random_state=42, shuffle=True)
+chan_vals_train, chan_vals_test = train_test_split(data_channel_values, test_size=0.3, random_state=42, shuffle=True)
+chan_vals_test, chan_vals_val = train_test_split(chan_vals_test, test_size=0.5, random_state=42, shuffle=True)
 
 vae=autoencoder.fit(data_train, epochs=epoch, batch_size=batch_size, validation_data=(data_val, None), callbacks= [myCallBacks])
 
@@ -458,28 +474,28 @@ predicted_train=autoencoder.predict(data_train).reshape(-1,data_train.shape[1],d
 #predicted_val=autoencoder.predict(data_val).reshape(-1,data_val.shape[1],data_val.shape[2])
 predicted_test=autoencoder.predict(data_test).reshape(-1,data_test.shape[1],data_test.shape[2])
 
+
 middle_vals_test = np.array(encoder_model_trained.predict(data_test))
+  
 
 
-# print("The BDM of the data_train: " + str(calculate_bdm(data_test, normalized=False)))
-# print("The BDM of the predicted data: " + str(calculate_bdm(predicted_test, normalized=False)))
-
-# print("The NBDM of the data_train: " + str(calculate_bdm(data_test, normalized=True)))
-# print("The NBDM of the predicted data: " + str(calculate_bdm(predicted_test, normalized=True)))
 
 actual_train=data_train.reshape(-1,data_train.shape[1],data_train.shape[2])
 #actual_val=data_val.reshape(-1,data_val.shape[1],data_val.shape[2])
 actual_test=data_test.reshape(-1,data_test.shape[1],data_test.shape[2])
 
 
+
+
+
 #visualise actual and predicted image
-fig, axes = plt.subplots(nrows=2, ncols=5, sharex=True, sharey=True, figsize=(20,4))
-for images, row in zip([actual_test[100:105], predicted_test[100:105]], axes):
-  for img, ax in zip(images, row):
-    ax.imshow(img.reshape((40, 40)))
-    ax.get_xaxis().set_visible(False)
-    ax.get_yaxis().set_visible(False)
-plt.savefig('ActualPredicted5Images')
+# fig, axes = plt.subplots(nrows=2, ncols=5, sharex=True, sharey=True, figsize=(20,4))
+# for images, row in zip([actual_test[100:105], predicted_test[100:105]], axes):
+#   for img, ax in zip(images, row):
+#     ax.imshow(img.reshape((40, 40)))
+#     ax.get_xaxis().set_visible(False)
+#     ax.get_yaxis().set_visible(False)
+#plt.savefig('ActualPredicted5Images')
 
 
 #Compute SSIM, MSE, and MAE
@@ -549,34 +565,38 @@ with open('test_all.csv', 'a') as f:
 
 header=[]
 
-header.append('Num')
-header.append('Dimension')
-header.append('Actual Data BDM')
-header.append('Encoded Data BDM')
-header.append('Predicted Data BDM')
-header.append('Actual Data NBDM')
-header.append('Encoded Data NBDM')
-header.append('Predicted Data NBDM')
+# header.append('Num')
+# header.append('Dimension')
+# # header.append('Actual Data BDM')
+# # header.append('Encoded Data BDM')
+# # header.append('Predicted Data BDM')
+# # header.append('Actual Data NBDM')
+# # header.append('Encoded Data NBDM')
+# # header.append('Predicted Data NBDM')
+# header.append('Actual Data (No Interpolation) NBDM')
+# header.append('Predicted Data (No Interpolation) NBDM')
 
-with open('test_all_test_bdms.csv', 'a') as f:
-  writer = csv.writer(f)
-  #header = ['Time_Slice_length','Dimension','SSIM', 'MSE','Training Accuracy', 'Training F1-Score', 'Training Precision', 'Training Recall','Validation Accuracy']
-  #writer.writerow(header)
-  #write the header
-  writer.writerow(header)
-  #write the data
-  for i in range(actual_test.shape[0]):
-    result=[]
-    result.append(i)
-    result.append(z_dim)
-    result.append(calculate_bdm(actual_test[i]))
-    result.append(calculate_bdm(middle_vals_test[i]))
-    result.append(calculate_bdm(predicted_test[i]))
-    result.append(calculate_bdm(actual_test[i], normalized=True))
-    result.append(calculate_bdm(middle_vals_test[i], normalized=True))
-    result.append(calculate_bdm(predicted_test[i], normalized=True))
-    writer.writerow(result)
-  writer.writerow([])
+# with open('test_all_test_bdms.csv', 'a') as f:
+#   writer = csv.writer(f)
+#   #header = ['Time_Slice_length','Dimension','SSIM', 'MSE','Training Accuracy', 'Training F1-Score', 'Training Precision', 'Training Recall','Validation Accuracy']
+#   #writer.writerow(header)
+#   #write the header
+#   writer.writerow(header)
+#   #write the data
+#   for i in range(actual_test.shape[0]):
+#     result=[]
+#     result.append(i)
+#     result.append(z_dim)
+#     # result.append(calculate_bdm(actual_test[i]))
+#     # result.append(calculate_bdm(middle_vals_test[i]))
+#     # result.append(calculate_bdm(predicted_test[i]))
+#     # result.append(calculate_bdm(actual_test[i], normalized=True))
+#     # result.append(calculate_bdm(middle_vals_test[i], normalized=True))
+#     # result.append(calculate_bdm(predicted_test[i], normalized=True))
+#     result.append(calculate_bdm(removeInterpolation(actual_test[i]), normalized=True))
+#     result.append(calculate_bdm(removeInterpolation(predicted_test[i]), normalized=True))
+#     writer.writerow(result)
+#   writer.writerow([])
 
 end_time = datetime.now()
 print('Duration: {}'.format(end_time - start_time))
